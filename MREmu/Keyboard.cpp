@@ -165,7 +165,7 @@ bool point_in_triangle(sf::Vector2f pt, sf::Vector2f v1, sf::Vector2f v2, sf::Ve
 }
 
 bool point_in_quads(sf::Vector2f pt, sf::Vector2f v1, sf::Vector2f v2, sf::Vector2f v3, sf::Vector2f v4) {
-	return point_in_triangle(pt, v1, v2, v3) || point_in_triangle(pt, v1, v2, v4);
+	return point_in_triangle(pt, v1, v2, v3) || point_in_triangle(pt, v1, v3, v4);
 }
 
 void draw_roundline(sf::RenderTarget* rt, int x, int y, int w, int h, sf::Color c) {

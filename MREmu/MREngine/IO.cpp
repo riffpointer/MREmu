@@ -135,6 +135,12 @@ void vm_reg_keyboard_callback(vm_key_handler_t handler) {
 	io.key_handler = handler;
 }
 
+void vm_reg_pen_callback(vm_pen_handler_t handler) {
+	MREngine::AppIO& io = get_current_app_io();
+
+	io.pen_handler = handler;
+}
+
 VMFILE vm_file_open(const VMWSTR filename, VMUINT mode, VMUINT binary) {
 	MREngine::AppIO& io = get_current_app_io();
 
@@ -153,6 +159,9 @@ VMFILE vm_file_open(const VMWSTR filename, VMUINT mode, VMUINT binary) {
 
 	if (mode & MODE_APPEND)
 		fmode |= std::ios::out | std::ios::app;
+
+	if (fmode == std::ios::binary)
+		return -1;
 
 	std::fstream* f = new std::fstream;
 

@@ -9,6 +9,7 @@
 #include <cstring>
 #include <thread>
 #include <chrono>
+#include <vector>
 
 using namespace std::string_literals;
 
@@ -19,14 +20,10 @@ namespace GDB {
 	sf::TcpListener tcpListner;
 	sf::TcpSocket sock;
 
-	const uint32_t inbuf_size = 8 * 1024 * 1024;
-	uint8_t inbuf[inbuf_size];
+	std::vector<uint8_t> inbuf(8 * 1024 * 1024);
 	uint32_t inbuf_pos = 0;
 
-
-	const uint32_t outbuf_size = 8 * 1024 * 1024;
-	uint8_t outbuf[outbuf_size];
-	uint32_t outbuf_pos = 0;
+	std::vector<uint8_t> outbuf;
 
 	CpuState cpu_state = Work;
 	bool gdb_mode = false;
@@ -45,18 +42,22 @@ namespace GDB {
 		size_t received = 0;
 		do {
 			received = 0;
-			sock.receive(inbuf + inbuf_pos, inbuf_size - inbuf_pos, received);
+			if (inbuf.size() - inbuf_pos < 1024 * 1024) {
+				inbuf.resize(inbuf.size() * 2);
+			}
+			sock.receive(inbuf.data() + inbuf_pos, inbuf.size() - inbuf_pos, received);
 			inbuf_pos += received;
 
 			while (process_input());
 
-			if (outbuf_pos) {
+			if (!outbuf.empty()) {
 				size_t sended = 0;
-				sock.send(outbuf, outbuf_pos, sended);
-				if (sended != outbuf_pos) {
-					memmove(outbuf, outbuf + sended, outbuf_pos - sended);
+				sock.send(outbuf.data(), outbuf.size(), sended);
+				if (sended != outbuf.size()) {
+					outbuf.erase(outbuf.begin(), outbuf.begin() + sended);
+				} else {
+					outbuf.clear();
 				}
-				outbuf_pos -= sended;
 			}
 		} while (received);
 	}
@@ -64,8 +65,7 @@ namespace GDB {
 	void put_to_out(const uint8_t* data, uint32_t size) {
 		if (size == 0)
 			return;
-		memcpy(outbuf + outbuf_pos, data, size);
-		outbuf_pos += size;
+		outbuf.insert(outbuf.end(), data, data + size);
 	}
 
 	void make_answer(const uint8_t* data, uint32_t size) {
@@ -551,7 +551,7 @@ namespace GDB {
 
 		{
 			uint8_t checksum = 0;
-			int scanf_ret = sscanf((char*)inbuf + sharp_pos + 1, "%02hhx", &checksum);
+			int scanf_ret = sscanf((char*)inbuf.data() + sharp_pos + 1, "%02hhx", &checksum);
 			if (scanf_ret != 1 || checksum != c_checksum) {
 				printf("GDB: Fatal\n");
 				return 0;
@@ -559,7 +559,7 @@ namespace GDB {
 		}
 		put_to_out((const uint8_t*)"+", 1);
 
-		process_packet(std::string_view((char*)inbuf + 1, sharp_pos - 1));
+		process_packet(std::string_view((char*)inbuf.data() + 1, sharp_pos - 1));
 
 		return sharp_pos + 3;
 	}
@@ -579,7 +579,7 @@ namespace GDB {
 			printf("GDB: Some went wrong\n");
 			break;
 		case '$':
-			packet_len = check_packet(inbuf, inbuf_pos);
+			packet_len = check_packet(inbuf.data(), inbuf_pos);
 			break;
 		default:
 			printf("GDB: Unknown packet %c\n", inbuf[0]);
@@ -587,7 +587,7 @@ namespace GDB {
 
 		}
 
-		memmove(inbuf, inbuf + packet_len, inbuf_pos - packet_len);
+		memmove(inbuf.data(), inbuf.data() + packet_len, inbuf_pos - packet_len);
 		inbuf_pos -= packet_len;
 
 		return packet_len != 0;

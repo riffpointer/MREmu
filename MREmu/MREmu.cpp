@@ -185,6 +185,83 @@ int main(int argc, char** argv) {
 		}
 		ImGui::End();
 
+		if (ImGui::Begin("App Debug Info")) {
+			if (active_app) {
+				ImGui::Text("Active App: %s", active_app->path.string().c_str());
+				if (ImGui::CollapsingHeader("Recently Loaded Resources")) {
+					for (auto& str : active_app->resources.recently_loaded_strings) {
+						ImGui::Text("%s", str.c_str());
+					}
+				}
+			} else {
+				ImGui::Text("No active app.");
+			}
+		}
+		ImGui::End();
+
+		if (ImGui::Begin("Load App")) {
+			if (ImGui::Button("Browse (System Picker)")) {
+				std::thread([]() {
+					char filename[1024];
+#ifdef _WIN32
+					FILE* f = _popen("powershell -c \"Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.OpenFileDialog; $f.Filter = 'VXP Files (*.vxp)|*.vxp'; $f.ShowHelp = $true; if ($f.ShowDialog() -eq 'OK') { $f.FileName }\"", "r");
+#else
+					FILE* f = popen("zenity --file-selection --file-filter='*.vxp' --title='Select VXP App'", "r");
+#endif
+					if (f) {
+						if (fgets(filename, sizeof(filename), f) != NULL) {
+							std::string path = filename;
+							if (!path.empty() && path.back() == '\n') path.pop_back();
+							if (!path.empty() && path.back() == '\r') path.pop_back();
+							g_appManager->add_app_for_launch(path, true);
+						}
+#ifdef _WIN32
+						_pclose(f);
+#else
+						pclose(f);
+#endif
+					}
+				}).detach();
+			}
+			ImGui::Separator();
+			static std::string current_dir = fs::current_path().string();
+			ImGui::Text("Current Directory: %s", current_dir.c_str());
+			ImGui::Separator();
+			try {
+				for (const auto& entry : fs::directory_iterator(current_dir)) {
+					if (entry.is_regular_file() && entry.path().extension() == ".vxp") {
+						if (ImGui::Button(entry.path().filename().string().c_str())) {
+							appManager.add_app_for_launch(entry.path(), true);
+						}
+					}
+				}
+			} catch (...) {}
+		}
+		ImGui::End();
+
+		if (ImGui::Begin("CPU Speed")) {
+			static auto start_time = std::chrono::high_resolution_clock::now();
+			static auto last_time = start_time;
+			static uint64_t last_inst = 0;
+			static float mips = 0;
+			static float peak_mips = 0;
+			auto now = std::chrono::high_resolution_clock::now();
+			float dt = std::chrono::duration<float>(now - last_time).count();
+			float total_dt = std::chrono::duration<float>(now - start_time).count();
+			if (dt >= 1.0f) {
+				mips = (Cpu::g_cpu_instructions_executed - last_inst) / 1000000.0f / dt;
+				if (mips > peak_mips) peak_mips = mips;
+				last_inst = Cpu::g_cpu_instructions_executed;
+				last_time = now;
+			}
+			float avg_mips = total_dt > 0.0f ? (Cpu::g_cpu_instructions_executed / 1000000.0f / total_dt) : 0.0f;
+			ImGui::Text("Speed: %.2f MIPS", mips);
+			ImGui::Text("Peak Speed: %.2f MIPS", peak_mips);
+			ImGui::Text("Avg Speed: %.2f MIPS", avg_mips);
+			ImGui::Text("Total Insn (Est): %lu", (unsigned long)Cpu::g_cpu_instructions_executed);
+		}
+		ImGui::End();
+
 		{
 			sf::Sprite screen(graphic.screen_tex);
 			win_device.draw(screen);

@@ -97,22 +97,25 @@ namespace Memory {
 
 	size_t MemoryManager::malloc(size_t size, bool allow_protected, size_t align)
 	{
-		if (size > free_memory_size - (allow_protected ? 0 : protected_size))
+		size_t usable = (allow_protected || free_memory_size <= protected_size)
+						? free_memory_size
+						: free_memory_size - protected_size;
+		if (size > usable)
 			return 0;
 
 		size_t new_adr = start_adr + (allow_protected ? 0 : protected_size);
 
-		for (int i = 0; i < regions.size(); ++i) {
+		for (auto it = regions.begin(); it != regions.end(); ++it) {
 			if (new_adr % align != 0)
 				new_adr = ((new_adr / align) + 1) * align;
 
-			if (new_adr + size < regions[i].adr) {
-				regions.insert(regions.begin() + i, { new_adr, size });
+			if (new_adr + size <= it->adr) {
+				regions.insert(it, { new_adr, size });
 				free_memory_size -= size;
 				return new_adr;
 			}
 
-			new_adr = regions[i].adr + regions[i].size;
+			new_adr = it->adr + it->size;
 		}
 
 		if (new_adr % align != 0)
@@ -134,34 +137,35 @@ namespace Memory {
 
 		if (size == 0) {
 			free(addr);
-			return addr;
+			return 0;
 		}
 
-		int mem_ind = -1;
-		for (int i = 0; i < regions.size(); ++i) {
-			if (regions[i].adr == addr) {
-				mem_ind = i;
+		auto it = regions.begin();
+		for (; it != regions.end(); ++it) {
+			if (it->adr == addr) {
 				break;
 			}
 		}
 
-		if(mem_ind == -1)
+		if (it == regions.end())
 			return malloc(size);
 
-		if (size <= regions[mem_ind].size) {
-			free_memory_size += regions[mem_ind].size - size;
-			regions[mem_ind].size = size;
-			return regions[mem_ind].adr;
+		if (size <= it->size) {
+			free_memory_size += it->size - size;
+			it->size = size;
+			return it->adr;
 		}
 
-		size_t allow_max_size = mem_size - (regions[mem_ind].adr - start_adr);
-		if (mem_ind + 1 < regions.size())
-			allow_max_size = regions[mem_ind + 1].adr - regions[mem_ind].adr;
+		size_t allow_max_size = mem_size - (it->adr - start_adr);
+		auto next_it = it;
+		++next_it;
+		if (next_it != regions.end())
+			allow_max_size = next_it->adr - it->adr;
 
 		if (allow_max_size >= size) {
-			free_memory_size -= size - regions[mem_ind].size;
-			regions[mem_ind].size = size;
-			return regions[mem_ind].adr;
+			free_memory_size -= size - it->size;
+			it->size = size;
+			return it->adr;
 		}
 
 		size_t new_adr = malloc(size);
@@ -169,18 +173,18 @@ namespace Memory {
 		if (new_adr == 0)
 			return 0;
 
-		memcpy((void*)new_adr, (void*)regions[mem_ind].adr, regions[mem_ind].size); //need to be careful
-		free(regions[mem_ind].adr);
+		memcpy((void*)new_adr, (void*)it->adr, it->size);
+		free(it->adr);
 
 		return new_adr;
 	}
 
 	void MemoryManager::free(size_t addr)
 	{
-		for (int i = 0; i < regions.size(); ++i) {
-			if (regions[i].adr == addr) {
-				free_memory_size += regions[i].size;
-				regions.erase(regions.begin() + i);
+		for (auto it = regions.begin(); it != regions.end(); ++it) {
+			if (it->adr == addr) {
+				free_memory_size += it->size;
+				regions.erase(it);
 				return;
 			}
 		}

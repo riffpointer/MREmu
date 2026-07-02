@@ -54,14 +54,19 @@ unsigned char* MREngine::Resources::get_file_context()
 VMUINT8* vm_load_resource(char* res_name, VMINT* res_size) {
 	MREngine::Resources& resources = get_current_app_resources();
 
+	if (!res_name) return 0;
+
 	printf("vm_load_resource(%s)\n", res_name);
+	if(resources.recently_loaded_strings.size() >= 50) resources.recently_loaded_strings.erase(resources.recently_loaded_strings.begin());
+	resources.recently_loaded_strings.push_back(res_name);
 
 	MREngine::res_el* res = resources.find_py_name(res_name);
 
 	if (!res)
 		return 0;
 
-	*res_size = res->size;
+	if (res_size)
+		*res_size = res->size;
 
 	void* adr = vm_malloc(res->size);
 

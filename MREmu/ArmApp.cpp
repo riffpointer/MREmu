@@ -105,7 +105,11 @@ bool ArmApp::preparation()
 			ELFIO::section* psec = elf.sections[i];
 
 			if (psec->get_name() == std::string(".rel.dyn") || psec->get_name() == std::string(".rel.plt")) {
-				ELFIO::Elf32_Rel* sym = (ELFIO::Elf32_Rel*)&file_context[psec->get_address()]; //TODO
+				if (psec->get_offset() + psec->get_size() > file_context.size()) {
+					printf("ELF parsing error: section offset out of bounds\n");
+					abort();
+				}
+				ELFIO::Elf32_Rel* sym = (ELFIO::Elf32_Rel*)&file_context[psec->get_offset()]; // Fixed virtual address -> file offset
 				for (int i = 0; i < psec->get_size() / sizeof(ELFIO::Elf32_Rel); ++i) {
 					switch (sym[i].r_info & 0xFF) {
 					case 0x17:

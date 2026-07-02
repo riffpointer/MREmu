@@ -6,12 +6,15 @@
 static void* imei_ptr = 0;
 static void* imsi_ptr = 0;
 
+const char* default_imei = "1234567890123456";
+const char* default_imsi = "123456789012345";
+
 void MREngine::SIM::init()
 {
 	imei_ptr = Memory::shared_malloc(20);
-	memcpy(imei_ptr, "1234567890123456", 17);
+	memcpy(imei_ptr, default_imei, strlen(default_imei) + 1);
 	imsi_ptr = Memory::shared_malloc(20);
-	memcpy(imsi_ptr, "123456789012345", 16);
+	memcpy(imsi_ptr, default_imsi, strlen(default_imsi) + 1);
 }
 
 operator_t vm_get_operator(void) {

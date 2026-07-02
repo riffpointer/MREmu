@@ -42,7 +42,9 @@ malloc_stat_t* vm_get_malloc_stat(void) {
 }
 
 void* vm_malloc(int size) {
-	return Memory::app_malloc(size);
+	void* res = Memory::app_malloc(size);
+	printf("vm_malloc(%d) -> host: %p, emu: %08x\n", size, res, ADDRESS_TO_EMU(res));
+	return res;
 }
 
 void* vm_calloc(int size) {
@@ -59,6 +61,7 @@ void* vm_realloc(void* p, int size) {
 }
 
 void vm_free(void* ptr) {
+	printf("vm_free(host: %p, emu: %08x)\n", ptr, ADDRESS_TO_EMU(ptr));
 	Memory::app_free(ptr);
 }
 

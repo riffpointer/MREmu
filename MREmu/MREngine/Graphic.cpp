@@ -5,6 +5,8 @@
 #include <SFML/Graphics/Image.hpp>
 #include <vmgraph.h>
 #include <vmpromng.h>
+#include <filesystem>
+#include <iostream>
 
 MREngine::Graphic* graphic = 0; // Do I really need this?
 
@@ -21,11 +23,9 @@ void buf_to_texture(void* buf, int w, int h, sf::Texture& tex) {
 		pix_data[i * 4 + 2] = VM_COLOR_GET_BLUE(buf16[i]);
 		pix_data[i * 4 + 3] = 0xFF;
 	}
-	sf::Image im;
-	im.create(w, h, &pix_data[0]);
-
-	//sf::Texture tex;
-	tex.loadFromImage(im);
+	if (tex.getSize().x != w || tex.getSize().y != h)
+		tex.create(w, h);
+	tex.update(pix_data.data());
 
 	//return tex;
 }
@@ -61,10 +61,9 @@ void canvas_to_texture(std::pair<void*, sf::Texture>& p) {
 		pix_data[i * 4 + 1] = VM_COLOR_GET_GREEN(buf16[i]);
 		pix_data[i * 4 + 2] = VM_COLOR_GET_BLUE(buf16[i]);
 	}
-	sf::Image im;
-	im.create(w, h, pix_data.data());
-
-	p.second.loadFromImage(im);
+	if (p.second.getSize().x != w || p.second.getSize().y != h)
+		p.second.create(w, h);
+	p.second.update(pix_data.data());
 }
 
 MREngine::Graphic::Graphic()
@@ -217,6 +216,14 @@ void MREngine::AppGraphic::imgui_layers() {
 void MREngine::AppGraphic::imgui_canvases() {
 	std::lock_guard lock(canvases_list_mutex);
 	if (ImGui::Begin("Canvases")) {
+		if (ImGui::Button("Dump all canvases to './canvases_dump/'")) {
+			std::filesystem::create_directories("./canvases_dump");
+			for (int i = 0; i < canvases_list.size(); ++i) {
+				auto& el = canvases_list[i];
+				canvas_to_texture(el);
+				el.second.copyToImage().saveToFile("./canvases_dump/canvas_" + std::to_string(i) + ".png");
+			}
+		}
 		for (int i = 0; i < canvases_list.size(); ++i) {
 			auto& el = canvases_list[i];
 			canvas_to_texture(el);
@@ -235,6 +242,9 @@ void MREngine::AppGraphic::imgui_canvases() {
 			ImGui::Text("Id: %d, x: %d, y: %d, w: %d, h: %d",
 				i, cfp->left, cfp->top, cfp->width, cfp->height);
 			ImGui::Image(el.second);
+			if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+				el.second.copyToImage().saveToFile("canvas_" + std::to_string(i) + ".png");
+			}
 		}
 	}
 	ImGui::End();
@@ -288,7 +298,9 @@ VMINT vm_graphic_active_layer(VMINT handle) {
 }
 
 VMUINT8* vm_graphic_get_layer_buffer(VMINT handle) {
-	return (VMUINT8*)get_current_app_graphic().get_layer_buf(handle);
+	VMUINT8* res = (VMUINT8*)get_current_app_graphic().get_layer_buf(handle);
+	printf("vm_graphic_get_layer_buffer(%d) -> host: %p, emu: %08x\n", handle, res, ADDRESS_TO_EMU(res));
+	return res;
 }
 
 VMINT vm_graphic_flush_layer(VMINT* layer_handles, VMINT count) {//TODO
@@ -389,12 +401,30 @@ VMINT vm_graphic_get_bits_per_pixel(void) {
 }
 
 MREngine::canvas_signature* find_canvas_signature(VMUINT8* buf) {
+	if (!buf)
+		return 0;
+
+	// Check if buf is within shared memory bounds
+	unsigned char* mem_start = (unsigned char*)shared_memory_prt;
+	unsigned char* mem_end = mem_start + shared_memory_size;
+
+	if ((unsigned char*)buf < mem_start || (unsigned char*)buf >= mem_end)
+		return 0;
+
 	MREngine::canvas_signature* cs = (MREngine::canvas_signature*)buf;
-	if (memcmp(cs->magic, CANVAS_MAGIC, 9) == 0)
-		return cs;
-	cs = (MREngine::canvas_signature*)(buf - VM_CANVAS_DATA_OFFSET);
-	if (memcmp(cs->magic, CANVAS_MAGIC, 9) == 0)
-		return cs;
+	if ((unsigned char*)(cs + 1) <= mem_end) {
+		if (memcmp(cs->magic, CANVAS_MAGIC, 9) == 0)
+			return cs;
+	}
+
+	if ((unsigned char*)buf - VM_CANVAS_DATA_OFFSET >= mem_start) {
+		cs = (MREngine::canvas_signature*)(buf - VM_CANVAS_DATA_OFFSET);
+		if ((unsigned char*)(cs + 1) <= mem_end) {
+			if (memcmp(cs->magic, CANVAS_MAGIC, 9) == 0)
+				return cs;
+		}
+	}
+
 	return 0;
 }
 
@@ -494,11 +524,14 @@ struct frame_prop* vm_graphic_get_img_property_FIX(VMINT_CANVAS hcanvas, VMUINT8
 	if (hcanvas == 0)
 		return 0;
 
-	static struct frame_prop* info = (frame_prop*)Memory::shared_malloc(sizeof(frame_prop));
-
 	MREngine::canvas_signature* cs = (MREngine::canvas_signature*)(hcanvas);
 	if (memcmp(cs->magic, CANVAS_MAGIC, 9))
 		return 0;
+
+	struct frame_prop* info = (frame_prop*)Memory::shared_malloc(sizeof(frame_prop));
+	if (!info)
+		return 0;
+
 	MREngine::canvas_frame_property* cfp_dst = (MREngine::canvas_frame_property*)(cs + 1);
 
 	//TODO frame index
@@ -560,9 +593,11 @@ void vm_graphic_blt(VMBYTE* dst_disp_buf, VMINT x_dest, VMINT y_dest, VMBYTE* sr
 		for (int sx = st_x; sx < end_x; ++sx) {
 			int im_x = sx - x_dest + x_src;
 			int im_y = sy - y_dest + y_src;
-			unsigned short scr_color = buf16_src[im_y * cfp_src->width + im_x];
-			if (!flag || scr_color != trans_color)
-				buf16_dst[sy * cfp_dst->width + sx] = scr_color;
+			if (im_x >= 0 && im_x < cfp_src->width && im_y >= 0 && im_y < cfp_src->height) {
+				unsigned short scr_color = buf16_src[im_y * cfp_src->width + im_x];
+				if (!flag || scr_color != trans_color)
+					buf16_dst[sy * cfp_dst->width + sx] = scr_color;
+			}
 		}
 }
 
@@ -612,9 +647,11 @@ void vm_graphic_blt_ex(VMBYTE* dst_disp_buf, VMINT x_dest, VMINT y_dest, VMBYTE*
 		for (int sx = st_x; sx < end_x; ++sx) {
 			int im_x = sx - x_dest + x_src;
 			int im_y = sy - y_dest + y_src;
-			unsigned short scr_color = buf16_src[im_y * cfp_src->width + im_x];
-			if (!flag || scr_color != trans_color)
-				buf16_dst[sy * cfp_dst->width + sx] = scr_color;
+			if (im_x >= 0 && im_x < cfp_src->width && im_y >= 0 && im_y < cfp_src->height) {
+				unsigned short scr_color = buf16_src[im_y * cfp_src->width + im_x];
+				if (!flag || scr_color != trans_color)
+					buf16_dst[sy * cfp_dst->width + sx] = scr_color;
+			}
 		}
 }
 
@@ -635,8 +672,11 @@ void vm_graphic_rotate(VMBYTE* buf, VMINT x_des, VMINT y_des,
 	int width = cfp_src->width;
 	int height = cfp_src->height;
 
-	if (degrees == VM_ROTATE_DEGREE_90 || degrees == VM_ROTATE_DEGREE_270)
+	if (degrees == VM_ROTATE_DEGREE_90 || degrees == VM_ROTATE_DEGREE_270) {
+		x_des += (width - height) / 2;
+		y_des += (height - width) / 2;
 		std::swap(width, height);
+	}
 
 	int st_x = std::max(0, x_des);
 	int st_y = std::max(0, y_des);
@@ -676,9 +716,11 @@ void vm_graphic_rotate(VMBYTE* buf, VMINT x_des, VMINT y_des,
 				im_x = width - im_x - 1, im_y = height - im_y - 1;
 
 
-			unsigned short scr_color = buf16_src[im_y * cfp_src->width + im_x];
-			if (!flag || scr_color != trans_color)
-				buf16_dst[sy * cfp_dst->width + sx] = scr_color;
+			if (im_x >= 0 && im_x < cfp_src->width && im_y >= 0 && im_y < cfp_src->height) {
+				unsigned short scr_color = buf16_src[im_y * cfp_src->width + im_x];
+				if (!flag || scr_color != trans_color)
+					buf16_dst[sy * cfp_dst->width + sx] = scr_color;
+			}
 		}
 }
 
@@ -730,9 +772,11 @@ void vm_graphic_mirror(VMBYTE* buf, VMINT x_des, VMINT y_des, VMBYTE* src_buf, V
 			else if (direction == VM_MIRROR_Y)
 				im_y = height - im_y - 1;
 
-			unsigned short scr_color = buf16_src[im_y * cfp_src->width + im_x];
-			if (!flag || scr_color != trans_color)
-				buf16_dst[sy * cfp_dst->width + sx] = scr_color;
+			if (im_x >= 0 && im_x < cfp_src->width && im_y >= 0 && im_y < cfp_src->height) {
+				unsigned short scr_color = buf16_src[im_y * cfp_src->width + im_x];
+				if (!flag || scr_color != trans_color)
+					buf16_dst[sy * cfp_dst->width + sx] = scr_color;
+			}
 		}
 }
 
@@ -932,12 +976,19 @@ void vm_graphic_fill_rect(VMUINT8* buf, VMINT x, VMINT y, VMINT width, VMINT hei
 			end_y = clip.bottom + 1;
 	}
 
-	for (int sy = st_y; sy < end_y; ++sy)
-		for (int sx = st_x; sx < end_x; ++sx)
-			if (x == sx || y == sy || sx == x + width - 1 || sy == y + height - 1)
-				buf16_dst[sy * cfp_dst->width + sx] = line_color;
-			else
-				buf16_dst[sy * cfp_dst->width + sx] = back_color;
+	for (int sy = st_y; sy < end_y; ++sy) {
+		unsigned short* row_ptr = buf16_dst + sy * cfp_dst->width + st_x;
+		std::fill(row_ptr, row_ptr + (end_x - st_x), back_color);
+	}
+	
+	for (int sx = st_x; sx < end_x; ++sx) {
+		if (y >= st_y && y < end_y) buf16_dst[y * cfp_dst->width + sx] = line_color;
+		if (y + height - 1 >= st_y && y + height - 1 < end_y) buf16_dst[(y + height - 1) * cfp_dst->width + sx] = line_color;
+	}
+	for (int sy = st_y; sy < end_y; ++sy) {
+		if (x >= st_x && x < end_x) buf16_dst[sy * cfp_dst->width + x] = line_color;
+		if (x + width - 1 >= st_x && x + width - 1 < end_x) buf16_dst[sy * cfp_dst->width + x + width - 1] = line_color;
+	}
 }
 
 void vm_graphic_fill_rect_ex(VMINT handle, VMINT  x, VMINT  y, VMINT  width, VMINT  height) {

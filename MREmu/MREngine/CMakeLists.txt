@@ -11,7 +11,7 @@ add_library (MREngine
 						"Sock.cpp" "Sock.h"
 						"Audio.cpp" "Audio.h" "AudioBitstream.cpp" "AudioBitstreamRec.cpp"
 						"CharSet.cpp" "CharSet.h"
-						"Textout.cpp" 
+						"Textout.cpp" "unifont.cpp" "unifont.h" 
 						"STDLib.cpp" 
 						"ItemsMng.h")
 

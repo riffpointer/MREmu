@@ -15,6 +15,13 @@ namespace Cpu {
 	size_t stack_size = 128 * 1024;
 
 	uc_hook uc_hu;
+	uc_hook uc_hu_block;
+
+	uint64_t g_cpu_instructions_executed = 0;
+
+	static void hook_block(uc_engine *uc, uint64_t address, uint32_t size, void *user_data) {
+		g_cpu_instructions_executed += size / 2;
+	}
 
 	static void write_reg(uc_engine* uc, int reg, unsigned int val) {
 		uc_reg_write(uc, reg, &val);
@@ -143,15 +150,13 @@ namespace Cpu {
 	static bool hook_read_unmapped(uc_engine* uc, uc_mem_type type, uint64_t address, int size, int64_t value, void* user_data)
 	{
 		printf(">>> Try to read block at 0x%08X, block size = 0x%08X                  ---- UNMAPPED\n", (int)address, size);
-		uc_mem_map(uc, (address / 0x1000) * 0x1000, 0x1000, UC_PROT_ALL);
-		return true;
+		return false;
 	}
 
 	static bool hook_write_unmapped(uc_engine* uc, uc_mem_type type, uint64_t address, int size, int64_t value, void* user_data)
 	{
 		printf(">>> Try to write block at 0x%08X, block size = 0x%08X, value = 0x%08X  ---- UNMAPPED\n", (int)address, size, (int)value);
-		uc_mem_map(uc, (address / 0x1000) * 0x1000, 0x1000, UC_PROT_ALL);
-		return true;
+		return false;
 	}
 
 	void init() {
@@ -171,12 +176,13 @@ namespace Cpu {
 
 		stack_p = Memory::shared_malloc(stack_size);
 		if (stack_p == 0)
-			abort;
+			abort();
 
 		write_reg(uc, UC_ARM_REG_SP, ADDRESS_TO_EMU(stack_p) + stack_size);
 
 		uc_hook_add(uc, &uc_hu, UC_HOOK_MEM_READ_UNMAPPED, (void*)hook_read_unmapped, 0, 1, 0);
 		uc_hook_add(uc, &uc_hu, UC_HOOK_MEM_WRITE_UNMAPPED, (void*)hook_write_unmapped, 0, 1, 0);
+		uc_hook_add(uc, &uc_hu_block, UC_HOOK_BLOCK, (void*)hook_block, 0, 1, 0);
 
 
 		//uc_hook_add(uc, &uc_hu, UC_HOOK_CODE, (void*)hook_stack, 0, 0, 0x100000000);

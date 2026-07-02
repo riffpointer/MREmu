@@ -18,6 +18,8 @@
 #include <vmchset.h>
 #include <vmsim.h>
 #include <vmstdlib.h>
+extern std::string error_message;
+extern bool show_error;
 #include <vmmm.h>
 #include <vmbitstream.h>
 
@@ -214,6 +216,10 @@ namespace Bridge {
 		{FUNCN(vm_reg_keyboard_callback), [](uc_engine* uc) {
 			vm_reg_keyboard_callback(
 				(vm_key_handler_t)read_arg(uc, 0));
+		}},
+		{FUNCN(vm_reg_pen_callback), [](uc_engine* uc) {
+			vm_reg_pen_callback(
+				(vm_pen_handler_t)read_arg(uc, 0));
 		}},
 		{FUNCN(vm_file_open), [](uc_engine* uc) {
 			write_ret(uc, vm_file_open(
@@ -503,7 +509,7 @@ namespace Bridge {
 				read_arg(uc, 9)
 			);
 		}},
-		{FUNCN(vm_graphic_rotate), [](uc_engine* uc) { //WRONG
+		{FUNCN(vm_graphic_rotate), [](uc_engine* uc) {
 			vm_graphic_rotate(
 				(VMBYTE*)ADDRESS_FROM_EMU(read_arg(uc, 0)),
 				read_arg(uc, 1),
@@ -852,6 +858,12 @@ namespace Bridge {
 		{FUNCN(vm_set_volume), [](uc_engine* uc) {
 			vm_set_volume(read_arg(uc, 0));
 		}},
+		{FUNCN(vm_audio_suspend_bg_play), [](uc_engine* uc) {
+			vm_audio_suspend_bg_play();
+		}},
+		{FUNCN(vm_audio_resume_bg_play), [](uc_engine* uc) {
+			vm_audio_resume_bg_play();
+		}},
 		{FUNCN(vm_midi_play_by_bytes), [](uc_engine* uc) {
 			write_ret(uc,
 				vm_midi_play_by_bytes(
@@ -1113,11 +1125,10 @@ namespace Bridge {
 	void bridge_hoock(uc_engine* uc, uint64_t address, uint32_t size, void* user_data) {
 		int ind = (address - ADDRESS_TO_EMU(func_ptr)) / 2;
 
-		if (ind > func_map.size())
+		if (ind >= func_map.size())
 			abort();
-		//if(ind) printf("--%s-- called -> ", func_map[ind].name.c_str());
+		if(ind) printf("--%s-- called\n", func_map[ind].name.c_str());
 		func_map[ind].f(uc);
-		//if (ind) printf("%08x\n", read_arg(uc, 0));
 	}
 
 	void init() {
@@ -1187,9 +1198,9 @@ namespace Bridge {
 			if (err) {
 				printf("uc_emu_start returned %d (%s)\n", err, uc_strerror(err));
 				Cpu::printREG(uc);
-				while (1) {
-					std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-				}
+				error_message = "Emulator crashed: " + std::string(uc_strerror(err));
+				show_error = true;
+				return -1;
 			}
 		}
 		else

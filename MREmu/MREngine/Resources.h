@@ -17,6 +17,7 @@ namespace MREngine {
 		uint32_t size = 0;
 
 		std::map<std::string, res_el> res_map;
+		std::vector<std::string> recently_loaded_strings;
 
 		void scan();
 

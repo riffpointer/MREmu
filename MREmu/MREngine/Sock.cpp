@@ -1,3 +1,4 @@
+#include <thread>
 #include <SFML/Network.hpp>
 #include "../Memory.h"
 #include "../Bridge.h"
@@ -17,11 +18,12 @@ void MREngine::AppSock::update(App* app){
                 app->run(tcp.callback, i, VM_TCP_EVT_CONNECTED);
             }
 
+            sf::Socket::Status res = sf::Socket::Done;
             if (tcp.is_connected) {
                 if (tcp.receive_tmp_buf_pos != SOCK_TMP_BUF_SIZE) {
                     size_t recived = 0;
                     tcp.soc->setBlocking(false);
-                    auto res = tcp.soc->receive(tcp.receive_tmp_buf + tcp.receive_tmp_buf_pos, 
+                    res = tcp.soc->receive(tcp.receive_tmp_buf + tcp.receive_tmp_buf_pos, 
                         SOCK_TMP_BUF_SIZE - tcp.receive_tmp_buf_pos, recived);
 
                     tcp.receive_tmp_buf_pos += recived;
@@ -31,7 +33,7 @@ void MREngine::AppSock::update(App* app){
                 }
             }
 
-           /* switch (res)
+            switch (res)
             {
             case sf::Socket::Done:
                 break;
@@ -40,16 +42,15 @@ void MREngine::AppSock::update(App* app){
             case sf::Socket::Partial:
                 break;
             case sf::Socket::Disconnected:
+            case sf::Socket::Error:
                 if (!tcp.is_disconnected) {
-                    Bridge::run_cpu(tcp.callback, 2, i, VM_TCP_EVT_PIPE_BROKEN);
+                    app->run(tcp.callback, i, VM_TCP_EVT_PIPE_BROKEN);
                 }
                 tcp.is_disconnected = true;
                 break;
-            case sf::Socket::Error:
-                break;
             default:
                 break;
-            }*/
+            }
             /**/
         }
 }
@@ -88,24 +89,24 @@ VMINT vm_soc_get_host_by_name(VMINT apn,
 VMINT vm_tcp_connect(const char* host, const VMINT port, const VMINT apn,
     void (*callback)(VMINT handle, VMINT event)) {
 
-    MREngine::tcp_el tcp = { std::make_shared<sf::TcpSocket>(), callback };
-
-    tcp.soc->setBlocking(true);
-    auto res = tcp.soc->connect(host, port);
-    tcp.soc->setBlocking(false);
-
-    switch (res){
-    case sf::Socket::Disconnected:
-    case sf::Socket::Error:
-        return -1;
-        break;
-    }
-
-    //std::size_t dummy;
-    //auto res1 = tcp.soc->receive(&dummy, 0, dummy);
+    MREngine::tcp_el tcp;
+    tcp.soc = std::make_shared<sf::TcpSocket>();
+    tcp.callback = callback;
+    tcp.is_connected = false;
+    tcp.is_disconnected = false;
+    tcp.receive_tmp_buf_pos = 0;
 
     MREngine::AppSock& app_sock = get_current_app_sock();
-    return app_sock.tcps.push(tcp);
+    VMINT h = app_sock.tcps.push(tcp);
+    
+    std::string host_str = host;
+    auto soc = app_sock.tcps[h].soc;
+    
+    std::thread([host_str, port, soc]() {
+        soc->connect(host_str, port);
+    }).detach();
+
+    return h;
 }
 
 void vm_tcp_close(VMINT handle) {

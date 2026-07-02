@@ -1,3 +1,4 @@
+#include <list>
 #pragma once
 #include <cstdint>
 #include <vector>
@@ -32,7 +33,7 @@ namespace Memory {
 		size_t mem_size = 0;
 		size_t free_memory_size = 0;
 		size_t protected_size = 0;
-		std::vector<memory_region_t> regions;
+		std::list<memory_region_t> regions;
 	public:
 		void setup(size_t start_adr, size_t size, size_t protected_size = 0);
 
